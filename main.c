@@ -14,11 +14,12 @@ void exit_program()
     system("clear");
     exit(EXIT_SUCCESS);
 }
-
 void connect_to_socket(char **URL, char **Path, int *Sock_fd)
 {
     char url_buffer[255];
     printf("Enter URL or paste text:\n");
+
+    // Read user input
     if (fgets(url_buffer, sizeof(url_buffer), stdin) != NULL)
     {
         size_t len = strlen(url_buffer);
@@ -28,26 +29,72 @@ void connect_to_socket(char **URL, char **Path, int *Sock_fd)
         }
     }
 
-    *URL = strdup(url_buffer);
+    // Check if input is empty
+    if (url_buffer[0] == '\0')
+    {
+        fprintf(stderr, "Error: No URL provided.\n");
+        return;
+    }
 
+    // Duplicate URL buffer
+    *URL = strdup(url_buffer);
+    if (*URL == NULL)
+    {
+        perror("strdup");
+        return;
+    }
+
+    // Validate URL and get port
     int port = getPort(*URL);
     if (port == -1)
     {
         port = 80;
     }
+
     char port_str[10];
     snprintf(port_str, sizeof(port_str), "%d", port);
 
+    // Get path from URL
     char *path = getPath(*URL);
+    if (path == NULL)
+    {
+        fprintf(stderr, "Error: Failed to extract path from URL.\n");
+        free(*URL);
+        *URL = NULL;
+        return;
+    }
+
+    // Convert path to lowercase
     char *lower_case_path = strdup(path);
+    if (lower_case_path == NULL)
+    {
+        perror("strdup");
+        free(*URL);
+        *URL = NULL;
+        free(path);
+        return;
+    }
     to_lowercase(lower_case_path);
 
+    // Process URL
     remove_substring(*URL, "https://");
     remove_substring(*URL, "http://");
     remove_substring(*URL, lower_case_path);
     remove_substring(*URL, port_str);
     remove_substring(*URL, ":");
+    free(lower_case_path);
 
+    // Check if URL is valid
+    if (**URL == '\0')
+    {
+        fprintf(stderr, "Error: Invalid URL after processing.\n");
+        free(*URL);
+        *URL = NULL;
+        free(path);
+        return;
+    }
+
+    // Initialize and perform socket operations
     int sock_fd, status;
     struct addrinfo hints, *addr, *p;
 
@@ -55,14 +102,17 @@ void connect_to_socket(char **URL, char **Path, int *Sock_fd)
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
 
+    // Resolve address
     if ((status = getaddrinfo(*URL, port_str, &hints, &addr)) != 0)
     {
         fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
         free(*URL);
-        free(lower_case_path);
+        *URL = NULL;
+        free(path);
         return;
     }
 
+    // Create and connect socket
     for (p = addr; p != NULL; p = p->ai_next)
     {
         if ((sock_fd = socket(p->ai_family, p->ai_socktype, 0)) != -1)
@@ -71,24 +121,37 @@ void connect_to_socket(char **URL, char **Path, int *Sock_fd)
             {
                 break;
             }
+            close(sock_fd);
         }
-        close(sock_fd);
     }
 
+    // Handle connection failure
     if (p == NULL)
     {
         perror("socket or connect");
         free(*URL);
-        free(lower_case_path);
+        *URL = NULL;
+        free(path);
         freeaddrinfo(addr);
         return;
     }
 
     freeaddrinfo(addr);
 
+    // Prepare and return results
     *Path = strdup(path);
+    if (*Path == NULL)
+    {
+        perror("strdup");
+        close(sock_fd);
+        free(*URL);
+        *URL = NULL;
+        free(path);
+        return;
+    }
+
     *Sock_fd = sock_fd;
-    free(lower_case_path);
+    free(path);
 }
 
 void get_func()
@@ -144,47 +207,52 @@ void post_func()
 
     connect_to_socket(&Url, &Path, &sock_fd);
 
-    long content_length = 0;
-    char *content = NULL;
-
-    open_file(&content_length, &content);
-
-    char request[BUFFER_SIZE];
-    snprintf(request, sizeof(request), "POST %s HTTP/1.1\r\n"
-                                       "Host: %s\r\n"
-                                       "Content-Type: application/json\r\n"
-                                       "Content-Length: %ld\r\n"
-                                       "Connection: close\r\n"
-                                       "\r\n"
-                                       "%s",
-             Path, Url, content_length, content);
-
-    send(sock_fd, request, sizeof(request), 0);
-
-    char response[BUFFER_SIZE];
-    int n;
-
-    while ((n = recv(sock_fd, response, sizeof(response) - 1, 0)) > 0)
+    if (Url && Path && sock_fd != -1)
     {
-        response[n] = '\0';
-        printf("Bytes read: %d\n", n);
-        printf("Data: %s\n", response);
-    }
 
-    if (n < 0)
-    {
-        perror("recv");
-        close(sock_fd);
-        free(Url);
-        free(Path);
+        long content_length = 0;
+        char *content = NULL;
+
+        open_file(&content_length, &content);
+
+        char request[BUFFER_SIZE];
+        snprintf(request, sizeof(request), "POST %s HTTP/1.1\r\n"
+                                           "Host: %s\r\n"
+                                           "Content-Type: application/json\r\n"
+                                           "Content-Length: %ld\r\n"
+                                           "Connection: close\r\n"
+                                           "\r\n"
+                                           "%s",
+                 Path, Url, content_length, content);
+
+        send(sock_fd, request, sizeof(request), 0);
+
+        char response[BUFFER_SIZE];
+        int n;
+
+        while ((n = recv(sock_fd, response, sizeof(response) - 1, 0)) > 0)
+        {
+            response[n] = '\0';
+            printf("Bytes read: %d\n", n);
+            printf("Data: %s\n", response);
+        }
+
+        if (n < 0)
+        {
+            perror("recv");
+            close(sock_fd);
+            free(Url);
+            free(Path);
+            free(content);
+            return;
+        }
+
         free(content);
-        return;
+        close(sock_fd);
     }
 
     free(Url);
     free(Path);
-    free(content);
-    close(sock_fd);
 }
 
 void put_func() { printf("I'm a PUT func\n"); }
