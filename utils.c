@@ -46,16 +46,16 @@ char *getPath(const char *url)
     const char *path_start = strchr(scheme_end, '/');
     if (path_start == NULL)
     {
-        return strdup("");
+        return strdup("/");
     }
 
     size_t path_len = strlen(path_start);
     char *path = (char *)malloc(path_len + 1);
     if (path == NULL)
     {
+        perror("Malloc");
         return NULL;
     }
-
     strcpy(path, path_start);
 
     return path;
@@ -113,6 +113,36 @@ void to_lowercase(char *str)
         *str = tolower((unsigned char)*str);
         str++;
     }
+}
+
+void open_file(long *content_length, char **content)
+{
+    FILE *fptr = fopen("body.json", "r");
+    if (fptr == NULL)
+    {
+        perror("Error opening file");
+        return;
+    }
+
+    fseek(fptr, 0, SEEK_END);
+
+    long file_size = ftell(fptr);
+
+    fseek(fptr, 0, SEEK_SET);
+
+    char *buf = (char *)malloc(file_size + 1);
+    if (buf == NULL)
+    {
+        perror("Malloc");
+        return;
+    }
+    fread(buf, 1, file_size, fptr);
+
+    *content = strdup(buf);
+    *content_length = file_size;
+
+    fclose(fptr);
+    free(buf);
 }
 
 void remove_substring(char *str, const char *sub)
