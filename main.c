@@ -255,9 +255,106 @@ void post_func()
     free(Path);
 }
 
-void put_func() { printf("I'm a PUT func\n"); }
+void put_func()
+{
+    char *Url = NULL;
+    char *Path = NULL;
+    int sock_fd = -1;
 
-void delete_func() { printf("I'm a DELETE func\n"); }
+    printf("Add any parameters in body.json\n");
+
+    connect_to_socket(&Url, &Path, &sock_fd);
+
+    if (Url && Path && sock_fd != -1)
+    {
+
+        long content_length = 0;
+        char *content = NULL;
+
+        open_file(&content_length, &content);
+
+        char request[BUFFER_SIZE];
+        snprintf(request, sizeof(request), "PUT %s HTTP/1.1\r\n"
+                                           "Host: %s\r\n"
+                                           "Content-Type: application/json\r\n"
+                                           "Content-Length: %ld\r\n"
+                                           "Connection: close\r\n"
+                                           "\r\n"
+                                           "%s",
+                 Path, Url, content_length, content);
+
+        send(sock_fd, request, sizeof(request), 0);
+
+        char response[BUFFER_SIZE];
+        int n;
+
+        while ((n = recv(sock_fd, response, sizeof(response) - 1, 0)) > 0)
+        {
+            response[n] = '\0';
+            printf("Bytes read: %d\n", n);
+            printf("Data: %s\n", response);
+        }
+
+        if (n < 0)
+        {
+            perror("recv");
+            close(sock_fd);
+            free(Url);
+            free(Path);
+            free(content);
+            return;
+        }
+
+        free(content);
+        close(sock_fd);
+    }
+
+    free(Url);
+    free(Path);
+}
+
+void delete_func()
+{
+    char *Url = NULL;
+    char *path = NULL;
+    int sock_fd = -1;
+
+    connect_to_socket(&Url, &path, &sock_fd);
+
+    if (Url && path && sock_fd != -1)
+    {
+
+        char request[BUFFER_SIZE];
+        snprintf(request, sizeof(request),
+                 "DELETE %s HTTP/1.1\r\n"
+                 "Host: %s\r\n"
+                 "Connection: close\r\n"
+                 "\r\n",
+                 path, Url);
+
+        send(sock_fd, request, strlen(request), 0);
+
+        int n;
+        char response[BUFFER_SIZE];
+
+        while ((n = recv(sock_fd, response, sizeof(response) - 1, 0)) > 0)
+        {
+            response[n] = '\0';
+            printf("Bytes read: %d\n", n);
+            printf("Data: %s\n", response);
+        }
+
+        if (n < 0)
+        {
+            perror("read");
+        }
+
+        close(sock_fd);
+    }
+
+    free(Url);
+    free(path);
+}
 
 void choose_option(int option)
 {
