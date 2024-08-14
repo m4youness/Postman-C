@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
 #include <unistd.h>
 
 #define BUFFER_SIZE 1024
@@ -14,7 +16,81 @@ void exit_program()
     system("clear");
     exit(EXIT_SUCCESS);
 }
-void connect_to_socket(char **URL, char **Path, int *Sock_fd)
+
+void init_openssl()
+{
+    SSL_library_init();
+    SSL_load_error_strings();
+    OpenSSL_add_all_algorithms();
+}
+
+SSL_CTX *create_ssl_context()
+{
+    const SSL_METHOD *method;
+    SSL_CTX *ctx;
+
+    method = TLS_client_method();
+    ctx = SSL_CTX_new(method);
+    if (!ctx)
+    {
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+
+    return ctx;
+}
+
+SSL *create_ssl_connection(SSL_CTX *ctx, int sockfd)
+{
+    SSL *ssl;
+
+    ssl = SSL_new(ctx);
+    SSL_set_fd(ssl, sockfd);
+
+    if (SSL_connect(ssl) <= 0)
+    {
+        ERR_print_errors_fp(stderr);
+        SSL_free(ssl);
+        exit(EXIT_FAILURE);
+    }
+
+    return ssl;
+}
+
+void send_data(SSL *ssl, const char *data)
+{
+    if (SSL_write(ssl, data, strlen(data)) <= 0)
+    {
+        ERR_print_errors_fp(stderr);
+    }
+}
+
+void receive_data(SSL *ssl)
+{
+    char buffer[1024];
+    int bytes;
+
+    while ((bytes = SSL_read(ssl, buffer, sizeof(buffer) - 1)) > 0)
+    {
+        buffer[bytes] = '\0';
+        printf("Data: %s\n", buffer);
+        printf("Bytes read: %d\n", bytes);
+    }
+
+    if (bytes < 0)
+    {
+        ERR_print_errors_fp(stderr);
+    }
+}
+
+void cleanup(SSL *ssl, SSL_CTX *ctx)
+{
+    SSL_shutdown(ssl);
+    SSL_free(ssl);
+    SSL_CTX_free(ctx);
+}
+
+void create_socket(char **URL, char **Path, int *Sock_fd, int *Port)
 {
     char url_buffer[255];
     printf("Enter URL or paste text:\n");
@@ -29,14 +105,12 @@ void connect_to_socket(char **URL, char **Path, int *Sock_fd)
         }
     }
 
-    // Check if input is empty
     if (url_buffer[0] == '\0')
     {
         fprintf(stderr, "Error: No URL provided.\n");
         return;
     }
 
-    // Duplicate URL buffer
     *URL = strdup(url_buffer);
     if (*URL == NULL)
     {
@@ -44,17 +118,6 @@ void connect_to_socket(char **URL, char **Path, int *Sock_fd)
         return;
     }
 
-    // Validate URL and get port
-    int port = getPort(*URL);
-    if (port == -1)
-    {
-        port = 80;
-    }
-
-    char port_str[10];
-    snprintf(port_str, sizeof(port_str), "%d", port);
-
-    // Get path from URL
     char *path = getPath(*URL);
     if (path == NULL)
     {
@@ -64,7 +127,6 @@ void connect_to_socket(char **URL, char **Path, int *Sock_fd)
         return;
     }
 
-    // Convert path to lowercase
     char *lower_case_path = strdup(path);
     if (lower_case_path == NULL)
     {
@@ -76,7 +138,13 @@ void connect_to_socket(char **URL, char **Path, int *Sock_fd)
     }
     to_lowercase(lower_case_path);
 
-    // Process URL
+    int port = getPort(*URL);
+
+    *Port = port;
+
+    char port_str[10];
+    snprintf(port_str, sizeof(port_str), "%d", port);
+
     remove_substring(*URL, "https://");
     remove_substring(*URL, "http://");
     remove_substring(*URL, lower_case_path);
@@ -84,7 +152,6 @@ void connect_to_socket(char **URL, char **Path, int *Sock_fd)
     remove_substring(*URL, ":");
     free(lower_case_path);
 
-    // Check if URL is valid
     if (**URL == '\0')
     {
         fprintf(stderr, "Error: Invalid URL after processing.\n");
@@ -94,7 +161,6 @@ void connect_to_socket(char **URL, char **Path, int *Sock_fd)
         return;
     }
 
-    // Initialize and perform socket operations
     int sock_fd, status;
     struct addrinfo hints, *addr, *p;
 
@@ -102,7 +168,6 @@ void connect_to_socket(char **URL, char **Path, int *Sock_fd)
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
 
-    // Resolve address
     if ((status = getaddrinfo(*URL, port_str, &hints, &addr)) != 0)
     {
         fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
@@ -112,7 +177,6 @@ void connect_to_socket(char **URL, char **Path, int *Sock_fd)
         return;
     }
 
-    // Create and connect socket
     for (p = addr; p != NULL; p = p->ai_next)
     {
         if ((sock_fd = socket(p->ai_family, p->ai_socktype, 0)) != -1)
@@ -125,7 +189,6 @@ void connect_to_socket(char **URL, char **Path, int *Sock_fd)
         }
     }
 
-    // Handle connection failure
     if (p == NULL)
     {
         perror("socket or connect");
@@ -138,7 +201,6 @@ void connect_to_socket(char **URL, char **Path, int *Sock_fd)
 
     freeaddrinfo(addr);
 
-    // Prepare and return results
     *Path = strdup(path);
     if (*Path == NULL)
     {
@@ -154,47 +216,67 @@ void connect_to_socket(char **URL, char **Path, int *Sock_fd)
     free(path);
 }
 
-void get_func()
+void send_request(char *Url, char *path, int sock_fd, int Port, char request[1024])
 {
-    char *Url = NULL;
-    char *path = NULL;
-    int sock_fd = -1;
 
-    connect_to_socket(&Url, &path, &sock_fd);
-
-    if (Url && path && sock_fd != -1)
+    if (Url && path && sock_fd != -1 && Port != -1)
     {
 
-        char request[BUFFER_SIZE];
-        snprintf(request, sizeof(request),
-                 "GET %s HTTP/1.1\r\n"
-                 "Host: %s\r\n"
-                 "Connection: close\r\n"
-                 "\r\n",
-                 path, Url);
-
-        send(sock_fd, request, strlen(request), 0);
-
-        int n;
-        char response[BUFFER_SIZE];
-
-        while ((n = recv(sock_fd, response, sizeof(response) - 1, 0)) > 0)
+        if (Port == 443)
         {
-            response[n] = '\0';
-            printf("Bytes read: %d\n", n);
-            printf("Data: %s\n", response);
-        }
+            init_openssl();
+            SSL_CTX *ctx = create_ssl_context();
+            SSL *ssl = create_ssl_connection(ctx, sock_fd);
 
-        if (n < 0)
+            send_data(ssl, request);
+            receive_data(ssl);
+
+            cleanup(ssl, ctx);
+        }
+        else
         {
-            perror("read");
-        }
+            send(sock_fd, request, strlen(request), 0);
 
+            int n;
+            char response[BUFFER_SIZE];
+
+            while ((n = recv(sock_fd, response, sizeof(response) - 1, 0)) > 0)
+            {
+                response[n] = '\0';
+                printf("Data: %s\n", response);
+                printf("Bytes read: %d\n", n);
+            }
+
+            if (n < 0)
+            {
+                perror("read");
+            }
+        }
         close(sock_fd);
     }
 
     free(Url);
     free(path);
+}
+
+void get_func()
+{
+    char *Url = NULL;
+    char *path = NULL;
+    int sock_fd = -1;
+    int Port = -1;
+
+    create_socket(&Url, &path, &sock_fd, &Port);
+
+    char request[BUFFER_SIZE];
+    snprintf(request, sizeof(request),
+             "GET %s HTTP/1.1\r\n"
+             "Host: %s\r\n"
+             "Connection: close\r\n"
+             "\r\n",
+             path, Url);
+
+    send_request(Url, path, sock_fd, Port, request);
 }
 
 void post_func()
@@ -202,57 +284,26 @@ void post_func()
     char *Url = NULL;
     char *Path = NULL;
     int sock_fd = -1;
+    int port = -1;
 
     printf("Add any parameters in body.json\n");
 
-    connect_to_socket(&Url, &Path, &sock_fd);
+    create_socket(&Url, &Path, &sock_fd, &port);
+    long content_length = 0;
+    char *content = NULL;
 
-    if (Url && Path && sock_fd != -1)
-    {
+    open_file(&content_length, &content);
+    char request[BUFFER_SIZE];
+    snprintf(request, sizeof(request), "POST %s HTTP/1.1\r\n"
+                                       "Host: %s\r\n"
+                                       "Content-Type: application/json\r\n"
+                                       "Content-Length: %ld\r\n"
+                                       "Connection: close\r\n"
+                                       "\r\n"
+                                       "%s",
+             Path, Url, content_length, content);
 
-        long content_length = 0;
-        char *content = NULL;
-
-        open_file(&content_length, &content);
-
-        char request[BUFFER_SIZE];
-        snprintf(request, sizeof(request), "POST %s HTTP/1.1\r\n"
-                                           "Host: %s\r\n"
-                                           "Content-Type: application/json\r\n"
-                                           "Content-Length: %ld\r\n"
-                                           "Connection: close\r\n"
-                                           "\r\n"
-                                           "%s",
-                 Path, Url, content_length, content);
-
-        send(sock_fd, request, sizeof(request), 0);
-
-        char response[BUFFER_SIZE];
-        int n;
-
-        while ((n = recv(sock_fd, response, sizeof(response) - 1, 0)) > 0)
-        {
-            response[n] = '\0';
-            printf("Bytes read: %d\n", n);
-            printf("Data: %s\n", response);
-        }
-
-        if (n < 0)
-        {
-            perror("recv");
-            close(sock_fd);
-            free(Url);
-            free(Path);
-            free(content);
-            return;
-        }
-
-        free(content);
-        close(sock_fd);
-    }
-
-    free(Url);
-    free(Path);
+    send_request(Url, Path, sock_fd, port, request);
 }
 
 void put_func()
@@ -260,57 +311,26 @@ void put_func()
     char *Url = NULL;
     char *Path = NULL;
     int sock_fd = -1;
+    int port = -1;
 
     printf("Add any parameters in body.json\n");
 
-    connect_to_socket(&Url, &Path, &sock_fd);
+    create_socket(&Url, &Path, &sock_fd, &port);
+    long content_length = 0;
+    char *content = NULL;
 
-    if (Url && Path && sock_fd != -1)
-    {
+    open_file(&content_length, &content);
+    char request[BUFFER_SIZE];
+    snprintf(request, sizeof(request), "PUT %s HTTP/1.1\r\n"
+                                       "Host: %s\r\n"
+                                       "Content-Type: application/json\r\n"
+                                       "Content-Length: %ld\r\n"
+                                       "Connection: close\r\n"
+                                       "\r\n"
+                                       "%s",
+             Path, Url, content_length, content);
 
-        long content_length = 0;
-        char *content = NULL;
-
-        open_file(&content_length, &content);
-
-        char request[BUFFER_SIZE];
-        snprintf(request, sizeof(request), "PUT %s HTTP/1.1\r\n"
-                                           "Host: %s\r\n"
-                                           "Content-Type: application/json\r\n"
-                                           "Content-Length: %ld\r\n"
-                                           "Connection: close\r\n"
-                                           "\r\n"
-                                           "%s",
-                 Path, Url, content_length, content);
-
-        send(sock_fd, request, sizeof(request), 0);
-
-        char response[BUFFER_SIZE];
-        int n;
-
-        while ((n = recv(sock_fd, response, sizeof(response) - 1, 0)) > 0)
-        {
-            response[n] = '\0';
-            printf("Bytes read: %d\n", n);
-            printf("Data: %s\n", response);
-        }
-
-        if (n < 0)
-        {
-            perror("recv");
-            close(sock_fd);
-            free(Url);
-            free(Path);
-            free(content);
-            return;
-        }
-
-        free(content);
-        close(sock_fd);
-    }
-
-    free(Url);
-    free(Path);
+    send_request(Url, Path, sock_fd, port, request);
 }
 
 void delete_func()
@@ -318,42 +338,19 @@ void delete_func()
     char *Url = NULL;
     char *path = NULL;
     int sock_fd = -1;
+    int Port = -1;
 
-    connect_to_socket(&Url, &path, &sock_fd);
+    create_socket(&Url, &path, &sock_fd, &Port);
 
-    if (Url && path && sock_fd != -1)
-    {
+    char request[BUFFER_SIZE];
+    snprintf(request, sizeof(request),
+             "DELETE %s HTTP/1.1\r\n"
+             "Host: %s\r\n"
+             "Connection: close\r\n"
+             "\r\n",
+             path, Url);
 
-        char request[BUFFER_SIZE];
-        snprintf(request, sizeof(request),
-                 "DELETE %s HTTP/1.1\r\n"
-                 "Host: %s\r\n"
-                 "Connection: close\r\n"
-                 "\r\n",
-                 path, Url);
-
-        send(sock_fd, request, strlen(request), 0);
-
-        int n;
-        char response[BUFFER_SIZE];
-
-        while ((n = recv(sock_fd, response, sizeof(response) - 1, 0)) > 0)
-        {
-            response[n] = '\0';
-            printf("Bytes read: %d\n", n);
-            printf("Data: %s\n", response);
-        }
-
-        if (n < 0)
-        {
-            perror("read");
-        }
-
-        close(sock_fd);
-    }
-
-    free(Url);
-    free(path);
+    send_request(Url, path, sock_fd, Port, request);
 }
 
 void choose_option(int option)
@@ -395,7 +392,7 @@ void display_menu()
     printf("\t\t4. Send DELETE request\n");
     printf("\t\t5. Exit\n");
 
-    printf("Please choose an option: ");
+    printf("\nPlease choose an option: ");
     if (scanf("%d", &option) != 1)
     {
         fprintf(stderr, "Invalid input. Please enter a number.\n");

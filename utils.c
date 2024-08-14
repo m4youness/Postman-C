@@ -63,6 +63,16 @@ char *getPath(const char *url)
 
 int getPort(const char *url)
 {
+    if (strncmp(url, "https://", 8) == 0)
+    {
+        return 443;
+    }
+
+    if (strncmp(url, "http://", 7) == 0)
+    {
+        return 80;
+    }
+
     const char *scheme_end = strstr(url, "://");
     if (scheme_end == NULL)
     {
@@ -103,7 +113,7 @@ int getPort(const char *url)
         return atoi(port_str);
     }
 
-    return -1;
+    return 80;
 }
 
 void to_lowercase(char *str)
