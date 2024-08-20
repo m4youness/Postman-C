@@ -1,0 +1,28 @@
+[
+  {
+    "arguments": [
+      "/usr/bin/gcc",
+      "-c",
+      "-I/opt/homebrew/opt/openssl@3/include",
+      "-o",
+      "main",
+      "main.c"
+    ],
+    "directory": "/Users/mehdi/Documents/Coding Projects/Postman-C",
+    "file": "/Users/mehdi/Documents/Coding Projects/Postman-C/main.c",
+    "output": "/Users/mehdi/Documents/Coding Projects/Postman-C/main"
+  },
+  {
+    "arguments": [
+      "/usr/bin/gcc",
+      "-c",
+      "-I/opt/homebrew/opt/openssl@3/include",
+      "-o",
+      "main",
+      "utils.c"
+    ],
+    "directory": "/Users/mehdi/Documents/Coding Projects/Postman-C",
+    "file": "/Users/mehdi/Documents/Coding Projects/Postman-C/utils.c",
+    "output": "/Users/mehdi/Documents/Coding Projects/Postman-C/main"
+  }
+]
